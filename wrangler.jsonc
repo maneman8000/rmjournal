@@ -1,0 +1,60 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "rmjournal-worker",
+	"main": "src/worker.py",
+	"compatibility_date": "2026-03-17",
+	"compatibility_flags": [
+		"python_workers"
+	],
+	"observability": {
+		"enabled": true
+	},
+	/**
+	 * Cron Triggers
+	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
+	 * 毎日 UTC 18:00 = JST 03:00 に実行
+	 */
+	"triggers": {
+		"crons": [
+			"0 18 * * *"
+		]
+	},
+	/**
+	 * R2 Bucket Binding
+	 * https://developers.cloudflare.com/r2/api/workers/workers-api-usage/
+	 */
+	"r2_buckets": [
+		{
+			"binding": "R2_BUCKET",
+			"bucket_name": "rmjournal-storage"
+		}
+	],
+	/**
+	 * KV Namespace Bindings
+	 * https://developers.cloudflare.com/kv/api/
+	 */
+	"kv_namespaces": [
+		{
+			"binding": "RMJOURNAL_CACHE",
+			"id": "104b86e791004a6bbee33369d38e156b"
+		},
+		{
+			"binding": "RMJOURNAL_AUTH",
+			"id": "496077f8a5a9432392a288692197bc20"
+		}
+	],
+	/**
+	 * Secrets (登録は wrangler secret put コマンドで行う)
+	 * - RM_DEVICE_TOKEN
+	 * - RM_USER_TOKEN
+	 */
+	/**
+	 * Smart Placement
+	 * https://developers.cloudflare.com/workers/configuration/smart-placement/
+	 */
+	// "placement": { "mode": "smart" }
+}

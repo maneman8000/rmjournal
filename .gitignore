@@ -69,3 +69,12 @@ Thumbs.db
 # Project specific
 output/
 *.log
+
+# Cloudflare Workers / Wrangler
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+package-lock.json
+python_modules/
