@@ -99,16 +99,12 @@ class Default(WorkerEntrypoint):
                 return Response("Not Found", status=404)
 
             ct = _content_type(r2_key)
-            from js import Object
-            from pyodide.ffi import to_js
+            # Text formats: decode to string and return directly
+            if ct.startswith("text/") or ct in ("image/svg+xml", "application/json"):
+                return Response(data.decode("utf-8"), headers={"Content-Type": ct})
+            # Binary formats: convert to JS Uint8Array
+            from js import Uint8Array
 
-            headers = to_js({"Content-Type": ct}, dict_converter=Object.fromEntries)
-            return Response.new(
-                data,
-                init=to_js(
-                    {"status": 200, "headers": headers},
-                    dict_converter=Object.fromEntries,
-                ),
-            )
+            return Response(Uint8Array.new(data), headers={"Content-Type": ct})
 
         return Response("Not Found", status=404)
