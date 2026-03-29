@@ -179,42 +179,45 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
 import re
 import json
 
-def generate_daily_page(target_date: date, storage: StorageProvider):
+
+async def generate_daily_page(target_date: date, storage: StorageProvider):
     """
     Generate an index.html for a specific date containing all journal images.
     """
     date_path = target_date.strftime("%Y/%m/%d")
-    
+
     # Load metadata.json for titles
     metadata = {}
-    if storage.exists(f"{date_path}/metadata.json"):
+    if await storage.exists(f"{date_path}/metadata.json"):
         try:
-            metadata = json.loads(storage.get(f"{date_path}/metadata.json").decode("utf-8"))
+            metadata = json.loads(
+                (await storage.get(f"{date_path}/metadata.json")).decode("utf-8")
+            )
         except Exception as e:
             _logger.warning(f"Failed to load metadata: {e}")
 
     # List all SVGs in the images directory
     image_dir = f"{date_path}/images"
-    all_files = storage.list(image_dir)
+    all_files = await storage.list(image_dir)
     svg_keys = sorted([k for k in all_files if k.endswith(".svg")])
-    
+
     if not svg_keys:
         _logger.warning(f"No rendered images found for {target_date} in {image_dir}")
         return
 
     content_html = ""
     for s_key in svg_keys:
-        svg_content = storage.get(s_key).decode("utf-8")
+        svg_content = (await storage.get(s_key)).decode("utf-8")
         # Remove XML declaration and DOCTYPE if present for cleaner embedding
         if "<?xml" in svg_content:
-            svg_content = svg_content[svg_content.find(">")+1:].strip()
+            svg_content = svg_content[svg_content.find(">") + 1 :].strip()
         if "<!DOCTYPE" in svg_content:
-            svg_content = svg_content[svg_content.find(">")+1:].strip()
+            svg_content = svg_content[svg_content.find(">") + 1 :].strip()
 
         # Extract original filename to match with metadata
         filename = s_key.split("/")[-1]
         title = metadata.get(filename, filename)
-            
+
         content_html += f"""
         <div class="page-item">
             <div class="page-metadata">{title}</div>
@@ -224,23 +227,28 @@ def generate_daily_page(target_date: date, storage: StorageProvider):
         </div>
         """
 
-    html = DAILY_TEMPLATE.replace("$date_formatted", target_date.strftime("%A, %B %d, %Y"))
+    html = DAILY_TEMPLATE.replace(
+        "$date_formatted", target_date.strftime("%A, %B %d, %Y")
+    )
     html = html.replace("$date", target_date.isoformat())
     html = html.replace("$content", content_html)
 
-    storage.put(f"{date_path}/index.html", html.encode("utf-8"), content_type="text/html")
+    await storage.put(
+        f"{date_path}/index.html", html.encode("utf-8"), content_type="text/html"
+    )
     _logger.info(f"Generated daily page: {date_path}/index.html")
 
-def generate_index_page(storage: StorageProvider):
+
+async def generate_index_page(storage: StorageProvider):
     """
     Generate the main index.html listing all available dates.
     """
     _logger.info("Scanning storage for journal entries...")
-    
+
     # Find all index.html files at {YYYY}/{MM}/{DD}/index.html
-    all_keys = storage.list("")
+    all_keys = await storage.list("")
     date_pattern = re.compile(r"^(\d{4}/\d{2}/\d{2})/index\.html$")
-    
+
     date_paths = []
     for k in all_keys:
         match = date_pattern.match(k)
@@ -253,22 +261,22 @@ def generate_index_page(storage: StorageProvider):
     items_html = ""
     for d_path in date_paths:
         d_display = d_path.replace("/", "-")
-        
+
         # Get thumbnails (first 4 SVGs)
         image_dir = f"{d_path}/images"
-        images = storage.list(image_dir)
+        images = await storage.list(image_dir)
         svg_keys = sorted([k for k in images if k.endswith(".svg")])[:4]
-        
+
         thumbnails_html = ""
         for s_key in svg_keys:
             try:
-                svg_content = storage.get(s_key).decode("utf-8")
+                svg_content = (await storage.get(s_key)).decode("utf-8")
                 # Remove XML declaration if present
                 if "<?xml" in svg_content:
-                    svg_content = svg_content[svg_content.find(">")+1:].strip()
+                    svg_content = svg_content[svg_content.find(">") + 1 :].strip()
                 # Remove DOCTYPE if present
                 if "<!DOCTYPE" in svg_content:
-                    svg_content = svg_content[svg_content.find(">")+1:].strip()
+                    svg_content = svg_content[svg_content.find(">") + 1 :].strip()
                 thumbnails_html += f'<div class="thumb">{svg_content}</div>'
             except Exception as e:
                 _logger.warning(f"Failed to load thumbnail {s_key}: {e}")
@@ -289,5 +297,5 @@ def generate_index_page(storage: StorageProvider):
         items_html = "<p>No entries found yet.</p>"
 
     html = INDEX_TEMPLATE.replace("$items", items_html)
-    storage.put("index.html", html.encode("utf-8"), content_type="text/html")
+    await storage.put("index.html", html.encode("utf-8"), content_type="text/html")
     _logger.info("Generated main index.html")
