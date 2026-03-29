@@ -55,10 +55,8 @@ class R2StorageProvider(StorageProvider):
         if obj is None or not hasattr(obj, "arrayBuffer"):
             return None
         array_buffer = await obj.arrayBuffer()
-        # Convert JS ArrayBuffer back to Python bytes
-        from pyodide.ffi import to_py
-
-        return bytes(to_py(array_buffer))
+        # JS ArrayBuffer → Python bytes via memoryview (works in Pyodide Workers)
+        return bytes(memoryview(array_buffer))
 
     async def exists(self, key: str) -> bool:
         """Check if a key exists."""
