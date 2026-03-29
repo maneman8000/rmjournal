@@ -2,7 +2,7 @@ import json
 import logging
 from typing import List, Optional
 
-from .base import StorageProvider
+from storage.base import StorageProvider
 
 _logger = logging.getLogger(__name__)
 

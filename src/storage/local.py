@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from typing import List, Optional
-from .base import StorageProvider
+from storage.base import StorageProvider
 
 
 class LocalStorageProvider(StorageProvider):

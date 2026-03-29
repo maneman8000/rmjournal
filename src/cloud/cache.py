@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Any, List
-from .models import Entry, MetaItem, BlobDoc
+from cloud.models import Entry, MetaItem, BlobDoc
 
 _logger = logging.getLogger(__name__)
 

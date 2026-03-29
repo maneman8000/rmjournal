@@ -1,4 +1,4 @@
-from .storage.base import StorageProvider
+from storage.base import StorageProvider
 
 
 async def export_svg_to_storage(svg_data: str, storage: StorageProvider, key: str):

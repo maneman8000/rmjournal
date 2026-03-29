@@ -4,9 +4,9 @@ import json
 import io
 import zipfile
 from typing import List, Optional, Dict
-from .auth import AuthManager
-from .models import Entry, MetaItem, BlobDoc, ItemType
-from .cache import MetadataCache, KVMetadataCache
+from cloud.auth import AuthManager
+from cloud.models import Entry, MetaItem, BlobDoc, ItemType
+from cloud.cache import MetadataCache, KVMetadataCache
 
 _logger = logging.getLogger(__name__)
 

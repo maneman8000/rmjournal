@@ -1,7 +1,7 @@
 import logging
 from datetime import date
 from typing import List, Dict
-from ..storage.base import StorageProvider
+from storage.base import StorageProvider
 
 _logger = logging.getLogger(__name__)
 

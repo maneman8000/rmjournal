@@ -2,12 +2,12 @@ import logging
 import json
 from datetime import date, datetime
 from typing import List, Dict, Any
-from ..cloud.models import BlobDoc, Entry
-from ..renderer.svg import rm_content_to_svg
-from ..renderer.canvas import PAPER_PRO
-from ..exporter import export_svg_to_storage
-from .cli import JournalContext
-from .web import generate_daily_page
+from cloud.models import BlobDoc, Entry
+from renderer.svg import rm_content_to_svg
+from renderer.canvas import PAPER_PRO
+from exporter import export_svg_to_storage
+from journal.cli import JournalContext
+from journal.web import generate_daily_page
 
 _logger = logging.getLogger(__name__)
 
