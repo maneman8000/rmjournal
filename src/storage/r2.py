@@ -9,9 +9,8 @@ _logger = logging.getLogger(__name__)
 def _to_js_bytes(data: bytes):
     """Convert Python bytes to a JS Uint8Array via pyodide FFI."""
     from pyodide.ffi import to_js
-    import js
 
-    return to_js(data, dict_converter=js.Object.fromEntries)
+    return to_js(data)
 
 
 class R2StorageProvider(StorageProvider):
@@ -37,12 +36,8 @@ class R2StorageProvider(StorageProvider):
         js_data = _to_js_bytes(data)
         if content_type:
             from pyodide.ffi import to_js
-            import js
 
-            http_metadata = to_js(
-                {"contentType": content_type},
-                dict_converter=js.Object.fromEntries,
-            )
+            http_metadata = to_js({"contentType": content_type})
             await self._bucket.put(key, js_data, httpMetadata=http_metadata)
         else:
             await self._bucket.put(key, js_data)
@@ -55,8 +50,10 @@ class R2StorageProvider(StorageProvider):
         if obj is None or not hasattr(obj, "arrayBuffer"):
             return None
         array_buffer = await obj.arrayBuffer()
-        # JS ArrayBuffer → Python bytes via memoryview (works in Pyodide Workers)
-        return bytes(memoryview(array_buffer))
+        # JS ArrayBuffer (JsProxy) → Python bytes via Uint8Array
+        from js import Uint8Array
+
+        return bytes(Uint8Array.new(array_buffer))
 
     async def exists(self, key: str) -> bool:
         """Check if a key exists."""
@@ -66,7 +63,6 @@ class R2StorageProvider(StorageProvider):
     async def list(self, prefix: str = "") -> List[str]:
         """List all keys with the given prefix."""
         from pyodide.ffi import to_js
-        import js
 
         keys = []
         cursor = None
@@ -75,7 +71,7 @@ class R2StorageProvider(StorageProvider):
             options = {"prefix": prefix, "limit": 1000}
             if cursor:
                 options["cursor"] = cursor
-            js_options = to_js(options, dict_converter=js.Object.fromEntries)
+            js_options = to_js(options)
 
             result = await self._bucket.list(js_options)
             for obj in result.objects:
