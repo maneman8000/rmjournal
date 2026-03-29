@@ -38,6 +38,9 @@ class AuthManager:
             return None
         try:
             value = await self._kv.get("auth:user_token")
+            # KV returns JS null (not Python None) when key doesn't exist
+            if not isinstance(value, str):
+                return None
             return value
         except Exception as e:
             _logger.warning(f"Failed to load user token from KV: {e}")
