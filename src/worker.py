@@ -3,11 +3,14 @@ rmjournal Worker entrypoint for Cloudflare Workers (Python Workers / Pyodide).
 
 Handles:
   - scheduled(): Cron Trigger — daily sync from reMarkable Cloud → R2
-  - fetch(): HTTP handler — manual trigger via POST /trigger
+  - fetch(): HTTP handler
+      POST /trigger        — manual sync trigger
+      GET  /view/<path>    — R2 content viewer (token auth required)
 """
 
 import logging
 from datetime import date
+from urllib.parse import urlparse, parse_qs
 
 from workers import WorkerEntrypoint, Response
 
@@ -20,6 +23,21 @@ from journal.sync import process_journal
 from journal.web import generate_index_page
 
 _logger = logging.getLogger(__name__)
+
+_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".json": "application/json",
+    ".css": "text/css",
+    ".js": "text/javascript",
+}
+
+
+def _content_type(path: str) -> str:
+    for ext, ct in _CONTENT_TYPES.items():
+        if path.endswith(ext):
+            return ct
+    return "application/octet-stream"
 
 
 class Default(WorkerEntrypoint):
@@ -47,11 +65,50 @@ class Default(WorkerEntrypoint):
 
     async def fetch(self, request):
         """
-        HTTP handler for manual trigger.
-        Only accepts POST /trigger to avoid accidental invocations.
+        HTTP handler.
+
+        POST /trigger       — manual sync trigger
+        GET  /view/<path>   — R2 content viewer with token auth
         """
-        if request.method == "POST" and request.url.endswith("/trigger"):
+        url = str(request.url)
+        parsed = urlparse(url)
+        path = parsed.path
+
+        # --- POST /trigger ---
+        if request.method == "POST" and path == "/trigger":
             await self.scheduled(None)
             return Response("OK", status=200)
+
+        # --- GET /view/<path> ---
+        if request.method == "GET" and path.startswith("/view/"):
+            # Token authentication
+            params = parse_qs(parsed.query)
+            token = params.get("token", [None])[0]
+            expected = str(self.env.VIEW_TOKEN)
+            if not token or token != expected:
+                return Response("Unauthorized", status=401)
+
+            # Map /view/<r2_key> → R2 key
+            r2_key = path[len("/view/") :]
+            if not r2_key or r2_key.endswith("/"):
+                r2_key = r2_key + "index.html"
+
+            storage = R2StorageProvider(self.env.R2_BUCKET)
+            data = await storage.get(r2_key)
+            if data is None:
+                return Response("Not Found", status=404)
+
+            ct = _content_type(r2_key)
+            from js import Object
+            from pyodide.ffi import to_js
+
+            headers = to_js({"Content-Type": ct}, dict_converter=Object.fromEntries)
+            return Response.new(
+                data,
+                init=to_js(
+                    {"status": 200, "headers": headers},
+                    dict_converter=Object.fromEntries,
+                ),
+            )
 
         return Response("Not Found", status=404)
