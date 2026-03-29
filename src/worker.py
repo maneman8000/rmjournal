@@ -81,12 +81,38 @@ class Default(WorkerEntrypoint):
 
         # --- GET /view/<path> ---
         if request.method == "GET" and path.startswith("/view/"):
-            # Token authentication
-            params = parse_qs(parsed.query)
-            token = params.get("token", [None])[0]
             expected = str(self.env.VIEW_TOKEN)
-            if not token or token != expected:
-                return Response("Unauthorized", status=401)
+
+            # 1. token が URL クエリにある場合 → Cookie に保存してリダイレクト
+            params = parse_qs(parsed.query)
+            token_from_query = params.get("token", [None])[0]
+            if token_from_query:
+                if token_from_query != expected:
+                    return Response("Unauthorized", status=401)
+                # Cookie に保存してトークンなし URL にリダイレクト
+                redirect_url = parsed.scheme + "://" + parsed.netloc + path
+                return Response(
+                    None,
+                    status=302,
+                    headers={
+                        "Location": redirect_url,
+                        "Set-Cookie": f"rmjournal_token={token_from_query}; Path=/view/; HttpOnly; Secure; SameSite=Strict",
+                    },
+                )
+
+            # 2. Cookie からトークンを取得
+            cookie_header = request.headers.get("Cookie") or ""
+            token_from_cookie = None
+            for part in cookie_header.split(";"):
+                part = part.strip()
+                if part.startswith("rmjournal_token="):
+                    token_from_cookie = part[len("rmjournal_token=") :]
+                    break
+
+            if not token_from_cookie or token_from_cookie != expected:
+                return Response(
+                    "Unauthorized - add ?token=<your_token> to the URL", status=401
+                )
 
             # Map /view/<r2_key> → R2 key
             r2_key = path[len("/view/") :]
