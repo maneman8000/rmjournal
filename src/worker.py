@@ -10,6 +10,7 @@ Handles:
 
 import logging
 from datetime import date
+from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
 from workers import WorkerEntrypoint, Response
@@ -38,6 +39,16 @@ def _content_type(path: str) -> str:
         if path.endswith(ext):
             return ct
     return "application/octet-stream"
+
+
+def _get_cookie_token(request) -> Optional[str]:
+    """Cookie から rmjournal_token を取得して返す。なければ None。"""
+    cookie_header = request.headers.get("Cookie") or ""
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if part.startswith("rmjournal_token="):
+            return part[len("rmjournal_token=") :]
+    return None
 
 
 class Default(WorkerEntrypoint):
@@ -76,6 +87,9 @@ class Default(WorkerEntrypoint):
 
         # --- POST /trigger ---
         if request.method == "POST" and path == "/trigger":
+            token = _get_cookie_token(request)
+            if not token or token != str(self.env.VIEW_TOKEN):
+                return Response("Unauthorized", status=401)
             await self.scheduled(None)
             return Response("OK", status=200)
 
@@ -96,18 +110,12 @@ class Default(WorkerEntrypoint):
                     status=302,
                     headers={
                         "Location": redirect_url,
-                        "Set-Cookie": f"rmjournal_token={token_from_query}; Path=/view/; HttpOnly; Secure; SameSite=Strict",
+                        "Set-Cookie": f"rmjournal_token={token_from_query}; Path=/; HttpOnly; Secure; SameSite=Strict",
                     },
                 )
 
             # 2. Cookie からトークンを取得
-            cookie_header = request.headers.get("Cookie") or ""
-            token_from_cookie = None
-            for part in cookie_header.split(";"):
-                part = part.strip()
-                if part.startswith("rmjournal_token="):
-                    token_from_cookie = part[len("rmjournal_token=") :]
-                    break
+            token_from_cookie = _get_cookie_token(request)
 
             if not token_from_cookie or token_from_cookie != expected:
                 return Response(

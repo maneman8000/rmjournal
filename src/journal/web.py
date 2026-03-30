@@ -110,6 +110,27 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
             align-items: center;
         }
         h1 { margin-bottom: 40px; font-weight: 800; letter-spacing: -0.02em; }
+        .header-row {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .header-row h1 { margin-bottom: 0; }
+        #sync-btn {
+            padding: 10px 20px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+            white-space: nowrap;
+        }
+        #sync-btn:hover { opacity: 0.85; }
+        #sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .archive-list {
             width: 100%;
             max-width: 800px;
@@ -168,10 +189,36 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <h1>Journal Archives</h1>
+    <div class="header-row">
+        <h1>Journal Archives</h1>
+        <button id="sync-btn" onclick="triggerSync()">今すぐ同期</button>
+    </div>
     <div class="archive-list">
         $items
     </div>
+    <script>
+    async function triggerSync() {
+        const btn = document.getElementById('sync-btn');
+        btn.disabled = true;
+        btn.textContent = '同期中...';
+        try {
+            const res = await fetch('/trigger', { method: 'POST' });
+            if (res.ok) {
+                btn.textContent = '完了！';
+                setTimeout(() => location.reload(), 1500);
+            } else if (res.status === 401) {
+                btn.textContent = '認証エラー（再ログインしてください）';
+                btn.disabled = false;
+            } else {
+                btn.textContent = 'エラー(' + res.status + ')';
+                btn.disabled = false;
+            }
+        } catch (e) {
+            btn.textContent = 'エラー';
+            btn.disabled = false;
+        }
+    }
+    </script>
 </body>
 </html>
 """
