@@ -2,6 +2,7 @@ import logging
 import json
 from datetime import date, datetime
 from typing import List, Dict, Any
+import httpx
 from cloud.models import BlobDoc, Entry
 from renderer.svg import rm_content_to_svg
 from renderer.canvas import PAPER_PRO
@@ -23,6 +24,9 @@ def ms_to_date(ms_str: str) -> date:
 async def process_journal(ctx: JournalContext):
     """
     Main processing loop.
+
+    On subrequest limit errors, saves progress for completed docs
+    and exits gracefully. Remaining docs will be processed on next run.
     """
     _logger.info("Fetching document list...")
     all_docs = await ctx.client.list_docs()
@@ -42,22 +46,42 @@ async def process_journal(ctx: JournalContext):
     for doc in target_docs:
         _logger.info(f"Processing document: {doc.visible_name} ({doc.id})")
 
-        full_doc = await ctx.client.get_doc(doc.id)
-        if not full_doc:
-            _logger.warning(f"Could not fetch full doc info for {doc.id}")
-            continue
+        try:
+            full_doc = await ctx.client.get_doc(doc.id)
+            if not full_doc:
+                _logger.warning(f"Could not fetch full doc info for {doc.id}")
+                continue
 
-        processed_pages = await process_document_pages(ctx, full_doc)
-        for page_id in processed_pages:
-            filename = f"{doc.id}_{page_id}.svg"
-            doc_titles[filename] = doc.visible_name
+            processed_pages = await process_document_pages(ctx, full_doc)
+            for page_id in processed_pages:
+                filename = f"{doc.id}_{page_id}.svg"
+                doc_titles[filename] = doc.visible_name
+
+        except httpx.ConnectError as e:
+            _logger.warning(
+                f"Subrequest limit reached during process_journal ({e}), "
+                f"saving progress and stopping. Remaining docs deferred to next run."
+            )
+            break
 
     if doc_titles:
         date_prefix = ctx.target_date.strftime("%Y/%m/%d")
         meta_key = f"{date_prefix}/metadata.json"
+
+        # 既存の metadata.json とマージ（複数回実行時にタイトルが失われないように）
+        existing_meta = {}
+        if await ctx.storage.exists(meta_key):
+            try:
+                existing_meta = json.loads(
+                    (await ctx.storage.get(meta_key)).decode("utf-8")
+                )
+            except Exception as e:
+                _logger.warning(f"Failed to load existing metadata for merge: {e}")
+
+        merged_titles = {**existing_meta, **doc_titles}
         await ctx.storage.put(
             meta_key,
-            json.dumps(doc_titles, ensure_ascii=False).encode("utf-8"),
+            json.dumps(merged_titles, ensure_ascii=False).encode("utf-8"),
             content_type="application/json",
         )
 
@@ -68,6 +92,8 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
     """
     Inspect pages and render those modified on the target date.
     Uses .content blob for metadata and ordering.
+
+    On subrequest limit errors, returns pages processed so far.
     """
     # 1. Find .content entry
     content_entry = next((e for e in doc.entries if e.id.endswith(".content")), None)
@@ -76,7 +102,14 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
         return []
 
     # 2. Fetch and parse .content
-    content_bytes = await ctx.client.get_blob(content_entry.hash)
+    try:
+        content_bytes = await ctx.client.get_blob(content_entry.hash)
+    except httpx.ConnectError as e:
+        _logger.warning(
+            f"  Subrequest limit reached fetching .content for {doc.id}: {e}"
+        )
+        return []
+
     if not content_bytes:
         _logger.warning(f"  Failed to fetch .content for {doc.id}")
         return []
@@ -122,7 +155,15 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
             _logger.warning(f"    Could not find .rm hash for page {page_id}")
             continue
 
-        rm_content = await ctx.client.get_blob(rm_hash)
+        try:
+            rm_content = await ctx.client.get_blob(rm_hash)
+        except httpx.ConnectError as e:
+            _logger.warning(
+                f"    Subrequest limit reached fetching .rm for page {page_id}: {e}, "
+                f"returning {len(processed_pages)} pages processed so far"
+            )
+            break
+
         if not rm_content:
             _logger.warning(f"    Failed to fetch .rm content for page {page_id}")
             continue
@@ -139,6 +180,12 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
             _logger.info(f"    Saved to {image_key}")
             processed_pages.append(page_id)
 
+        except httpx.ConnectError as e:
+            _logger.warning(
+                f"    Subrequest limit reached saving page {page_id}: {e}, "
+                f"returning {len(processed_pages)} pages processed so far"
+            )
+            break
         except Exception as e:
             _logger.error(f"    Failed to render page {page_id}: {e}")
 

@@ -76,7 +76,15 @@ class RemarkableClient:
         return entries
 
     async def list_docs(self) -> List[BlobDoc]:
-        """List all documents by traversing the hash tree with caching."""
+        """
+        List all documents by traversing the hash tree with caching.
+
+        To stay within Cloudflare Workers' 50 subrequest limit, cache misses
+        are capped at MAX_CACHE_MISS_PER_RUN per invocation. Uncached docs
+        will be picked up on subsequent runs (Cron runs 6x/day).
+        """
+        MAX_CACHE_MISS_PER_RUN = 10
+
         root_info = await self.get_root_info()
         root_hash = root_info.get("hash") or root_info.get("Hash")
         if not root_hash:
@@ -86,12 +94,25 @@ class RemarkableClient:
         root_entries = self.parse_index(root_blob_content)
 
         docs = []
+        cache_miss_count = 0
+        all_fetched = True  # False になったら prune しない
+
         for entry in root_entries:
             cached_doc = await self.cache.get(entry.id, entry.hash)
             if cached_doc:
                 docs.append(cached_doc)
                 continue
 
+            # キャッシュミス上限チェック
+            if cache_miss_count >= MAX_CACHE_MISS_PER_RUN:
+                _logger.warning(
+                    f"Cache miss limit ({MAX_CACHE_MISS_PER_RUN}) reached in list_docs, "
+                    f"deferring remaining docs to next run"
+                )
+                all_fetched = False
+                break
+
+            cache_miss_count += 1
             try:
                 doc_index_content = await self.get_blob(entry.hash)
                 doc_subentries = self.parse_index(doc_index_content)
@@ -108,10 +129,20 @@ class RemarkableClient:
 
                 await self.cache.set(entry.id, doc)
                 docs.append(doc)
+            except httpx.ConnectError as e:
+                _logger.warning(
+                    f"Subrequest limit reached during list_docs ({e}), "
+                    f"returning {len(docs)} docs fetched so far"
+                )
+                all_fetched = False
+                break
             except Exception as e:
                 _logger.error(f"Error processing doc {entry.id}: {e}")
 
-        await self.cache.prune([e.id for e in root_entries])
+        # 全件取得できた場合のみ古いキャッシュを削除する
+        # (途中で打ち切った場合は prune するとキャッシュが壊れる)
+        if all_fetched:
+            await self.cache.prune([e.id for e in root_entries])
 
         return docs
 
