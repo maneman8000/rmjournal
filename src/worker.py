@@ -52,7 +52,7 @@ def _get_cookie_token(request) -> Optional[str]:
 
 
 class Default(WorkerEntrypoint):
-    async def scheduled(self, controller):
+    async def scheduled(self, controller, env=None, ctx=None):
         """
         Cron Trigger handler. Runs daily (see wrangler.jsonc triggers.crons).
         """
