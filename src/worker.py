@@ -13,6 +13,10 @@ from datetime import date
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
+# rmscene は新しいフォーマットのファイルに対して warning を出すことがあるが
+# 処理は継続されるため、error/warning としてログに出ないよう抑制する
+logging.getLogger("rmscene").setLevel(logging.ERROR)
+
 from workers import WorkerEntrypoint, Response
 
 from cloud.auth import AuthManager

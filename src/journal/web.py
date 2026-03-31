@@ -249,7 +249,7 @@ async def generate_daily_page(target_date: date, storage: StorageProvider):
     svg_keys = sorted([k for k in all_files if k.endswith(".svg")])
 
     if not svg_keys:
-        _logger.warning(f"No rendered images found for {target_date} in {image_dir}")
+        _logger.info(f"No rendered images found for {target_date} in {image_dir}")
         return
 
     content_html = ""
