@@ -114,7 +114,7 @@ class Default(WorkerEntrypoint):
                     status=302,
                     headers={
                         "Location": redirect_url,
-                        "Set-Cookie": f"rmjournal_token={token_from_query}; Path=/; HttpOnly; Secure; SameSite=Strict",
+                        "Set-Cookie": f"rmjournal_token={token_from_query}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=34560000",
                     },
                 )
 
