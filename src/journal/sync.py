@@ -57,9 +57,9 @@ async def process_journal(ctx: JournalContext):
                 filename = f"{doc.id}_{page_id}.svg"
                 doc_titles[filename] = doc.visible_name
 
-        except httpx.ConnectError as e:
+        except httpx.TransportError as e:
             _logger.warning(
-                f"Subrequest limit reached during process_journal ({e}), "
+                f"Network error during process_journal ({e}), "
                 f"saving progress and stopping. Remaining docs deferred to next run."
             )
             break
@@ -104,10 +104,8 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
     # 2. Fetch and parse .content
     try:
         content_bytes = await ctx.client.get_blob(content_entry.hash)
-    except httpx.ConnectError as e:
-        _logger.warning(
-            f"  Subrequest limit reached fetching .content for {doc.id}: {e}"
-        )
+    except httpx.TransportError as e:
+        _logger.warning(f"  Network error fetching .content for {doc.id}: {e}")
         return []
 
     if not content_bytes:
@@ -157,9 +155,9 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
 
         try:
             rm_content = await ctx.client.get_blob(rm_hash)
-        except httpx.ConnectError as e:
+        except httpx.TransportError as e:
             _logger.warning(
-                f"    Subrequest limit reached fetching .rm for page {page_id}: {e}, "
+                f"    Network error fetching .rm for page {page_id}: {e}, "
                 f"returning {len(processed_pages)} pages processed so far"
             )
             break
@@ -180,9 +178,9 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
             _logger.info(f"    Saved to {image_key}")
             processed_pages.append(page_id)
 
-        except httpx.ConnectError as e:
+        except httpx.TransportError as e:
             _logger.warning(
-                f"    Subrequest limit reached saving page {page_id}: {e}, "
+                f"    Network error saving page {page_id}: {e}, "
                 f"returning {len(processed_pages)} pages processed so far"
             )
             break

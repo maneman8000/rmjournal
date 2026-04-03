@@ -129,7 +129,7 @@ class RemarkableClient:
 
                 await self.cache.set(entry.id, doc)
                 docs.append(doc)
-            except httpx.ConnectError as e:
+            except httpx.TransportError as e:
                 _logger.warning(
                     f"Subrequest limit reached during list_docs ({e}), "
                     f"returning {len(docs)} docs fetched so far"
