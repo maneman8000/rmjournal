@@ -9,7 +9,7 @@ Handles:
 """
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
@@ -56,12 +56,9 @@ def _get_cookie_token(request) -> Optional[str]:
 
 
 class Default(WorkerEntrypoint):
-    async def scheduled(self, controller, env=None, ctx=None):
-        """
-        Cron Trigger handler. Runs daily (see wrangler.jsonc triggers.crons).
-        """
-        target_date = date.today()
-        _logger.info(f"[scheduled] Starting journal sync for {target_date}")
+    async def _run_sync(self, target_date: date):
+        """共通の同期処理。Cron と /trigger の両方から呼ばれる。"""
+        _logger.info(f"[sync] Starting journal sync for {target_date}")
 
         auth = AuthManager(
             device_token=self.env.RM_DEVICE_TOKEN,
@@ -76,7 +73,11 @@ class Default(WorkerEntrypoint):
         await process_journal(ctx)
         await generate_index_page(storage)
 
-        _logger.info(f"[scheduled] Journal sync complete for {target_date}")
+        _logger.info(f"[sync] Journal sync complete for {target_date}")
+
+    async def scheduled(self, controller, env=None, ctx=None):
+        """Cron Trigger handler."""
+        await self._run_sync(date.today())
 
     async def fetch(self, request):
         """
@@ -94,8 +95,23 @@ class Default(WorkerEntrypoint):
             token = _get_cookie_token(request)
             if not token or token != str(self.env.VIEW_TOKEN):
                 return Response("Unauthorized", status=401)
-            await self.scheduled(None)
-            return Response("OK", status=200)
+
+            # オプションで日付を指定できる: ?date=2026-03-29
+            params = parse_qs(parsed.query)
+            date_str = params.get("date", [None])[0]
+            if date_str:
+                try:
+                    target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    return Response(
+                        f"Invalid date format: '{date_str}'. Use YYYY-MM-DD.",
+                        status=400,
+                    )
+            else:
+                target_date = date.today()
+
+            await self._run_sync(target_date)
+            return Response(f"OK: synced {target_date}", status=200)
 
         # --- GET /view/<path> ---
         if request.method == "GET" and path.startswith("/view/"):
