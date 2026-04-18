@@ -13,12 +13,10 @@
 	"observability": {
 		"enabled": true
 	},
-	/**
-	 * Cron Triggers
-	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
-	 * - 0 */6 * * *  : sync（6時間ごと）
-	 * - 0 15 * * *   : archive ページ生成（UTC 15:00 = JST 0:00）
-	 */
+	// Cron Triggers
+	// https://developers.cloudflare.com/workers/configuration/cron-triggers/
+	// - "0 */6 * * *" : sync（6時間ごと）
+	// - "0 15 * * *"  : archive ページ生成（UTC 15:00 = JST 0:00）
 	"triggers": {
 		"crons": [
 			"0 */6 * * *",
