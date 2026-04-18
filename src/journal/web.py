@@ -109,14 +109,15 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
             flex-direction: column;
             align-items: center;
         }
-        h1 { margin-bottom: 40px; font-weight: 800; letter-spacing: -0.02em; }
         .header-row {
             display: flex;
             align-items: center;
             gap: 20px;
             margin-bottom: 40px;
+            width: 100%;
+            max-width: 800px;
         }
-        .header-row h1 { margin-bottom: 0; }
+        .header-row h1 { margin: 0; font-weight: 800; letter-spacing: -0.02em; flex-grow: 1; }
         #sync-btn {
             padding: 10px 20px;
             background: var(--accent-color);
@@ -140,7 +141,7 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
         }
         .date-item {
             background: white;
-            padding: 24px;
+            padding: 20px 24px;
             border-radius: 16px;
             text-decoration: none;
             color: inherit;
@@ -157,46 +158,73 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
         .date-info {
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 10px;
             flex-grow: 1;
         }
         .date-text { font-size: 1.25rem; font-weight: 700; color: #1a1a1a; }
         .thumbnails {
             display: flex;
-            gap: 10px;
+            gap: 8px;
             overflow: hidden;
-            margin-top: 15px;
         }
         .thumb {
-            width: 160px;
-            height: 90px;
-            background: white;
+            width: 120px;
+            height: 80px;
+            background: #f8f9fa;
             border-radius: 6px;
             overflow: hidden;
             border: 1px solid #e9ecef;
-            position: relative;
             box-shadow: 0 2px 6px rgba(0,0,0,0.05);
         }
-        .thumb svg {
-            position: absolute;
-            /* Scale to 40% of Paper Pro (954 -> 382) */
-            width: 382px;
-            height: auto;
-            top: -30px; 
-            left: -30px;
+        .thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: top left;
         }
         .arrow { color: #adb5bd; font-size: 1.5rem; margin-left: 10px; flex-shrink: 0; }
+        .pagination {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 30px;
+            padding: 0 4px;
+        }
+        .pagination a {
+            color: var(--accent-color);
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 18px;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            transition: box-shadow 0.2s;
+        }
+        .pagination a:hover { box-shadow: 0 4px 15px rgba(0,0,0,0.12); }
+        .pagination .spacer { flex: 1; }
     </style>
 </head>
 <body>
     <div class="header-row">
         <h1>Journal Archives</h1>
-        <button id="sync-btn" onclick="triggerSync()">今すぐ同期</button>
+        $sync_button
     </div>
     <div class="archive-list">
         $items
     </div>
-    <script>
+    <div class="pagination">
+        $pagination
+    </div>
+    $scripts
+</body>
+</html>
+"""
+
+SYNC_BUTTON_HTML = """<button id="sync-btn" onclick="triggerSync()">今すぐ同期</button>"""
+
+SYNC_SCRIPT_HTML = """<script>
     async function triggerSync() {
         const btn = document.getElementById('sync-btn');
         btn.disabled = true;
@@ -218,16 +246,45 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
             btn.disabled = false;
         }
     }
-    </script>
-</body>
-</html>
-"""
+    </script>"""
+
+
+def _build_date_item_html(d_path: str, image_keys: list) -> str:
+    """Build HTML for a single date entry with <img> thumbnails."""
+    d_display = d_path.replace("/", "-")
+    thumbnails_html = ""
+    for img_key in image_keys[:4]:
+        img_src = f"/view/{img_key}"
+        thumbnails_html += f'<div class="thumb"><img src="{img_src}" loading="lazy" alt=""></div>'
+
+    return f"""
+        <a href="/view/{d_path}/index.html" class="date-item">
+            <div class="date-info">
+                <span class="date-text">{d_display}</span>
+                <div class="thumbnails">{thumbnails_html}</div>
+            </div>
+            <span class="arrow">→</span>
+        </a>
+        """
+
+
+def _build_index_html(
+    items_html: str,
+    pagination_html: str,
+    show_sync_button: bool = False,
+) -> str:
+    """Render INDEX_TEMPLATE with given items and pagination."""
+    sync_button = SYNC_BUTTON_HTML if show_sync_button else ""
+    scripts = SYNC_SCRIPT_HTML if show_sync_button else ""
+    html = INDEX_TEMPLATE.replace("$sync_button", sync_button)
+    html = html.replace("$items", items_html)
+    html = html.replace("$pagination", pagination_html)
+    html = html.replace("$scripts", scripts)
+    return html
+
 
 import re
-import json
-
-
-async def generate_daily_page(target_date: date, storage: StorageProvider):
+import json(target_date: date, storage: StorageProvider):
     """
     Generate an index.html for a specific date containing all journal images.
     """
@@ -288,61 +345,125 @@ async def generate_daily_page(target_date: date, storage: StorageProvider):
 
 async def generate_index_page(storage: StorageProvider):
     """
-    Generate the main index.html listing all available dates.
+    Generate index.html with the latest 10 dates.
+    SVG thumbnails are referenced via <img> tags (no inline embedding).
     """
-    _logger.info("Scanning storage for journal entries...")
+    _logger.info("Generating index.html (latest 10 dates)...")
 
-    # Find all index.html files at {YYYY}/{MM}/{DD}/index.html
+    # Collect all dated index.html entries from R2
     all_keys = await storage.list("")
     date_pattern = re.compile(r"^(\d{4}/\d{2}/\d{2})/index\.html$")
+    date_paths = sorted(
+        [m.group(1) for k in all_keys if (m := date_pattern.match(k))],
+        reverse=True,
+    )
 
-    date_paths = []
-    for k in all_keys:
-        match = date_pattern.match(k)
-        if match:
-            date_paths.append(match.group(1))
-
-    # Sort descending
-    date_paths.sort(reverse=True)
+    # Latest 10 only
+    latest = date_paths[:10]
 
     items_html = ""
-    for d_path in date_paths:
-        d_display = d_path.replace("/", "-")
-
-        # Get thumbnails (first 4 SVGs)
+    for d_path in latest:
         image_dir = f"{d_path}/images"
         images = await storage.list(image_dir)
         svg_keys = sorted([k for k in images if k.endswith(".svg")])[:4]
-
-        thumbnails_html = ""
-        for s_key in svg_keys:
-            try:
-                svg_content = (await storage.get(s_key)).decode("utf-8")
-                # Remove XML declaration if present
-                if "<?xml" in svg_content:
-                    svg_content = svg_content[svg_content.find(">") + 1 :].strip()
-                # Remove DOCTYPE if present
-                if "<!DOCTYPE" in svg_content:
-                    svg_content = svg_content[svg_content.find(">") + 1 :].strip()
-                thumbnails_html += f'<div class="thumb">{svg_content}</div>'
-            except Exception as e:
-                _logger.warning(f"Failed to load thumbnail {s_key}: {e}")
-
-        items_html += f"""
-        <a href="{d_path}/index.html" class="date-item">
-            <div class="date-info">
-                <span class="date-text">{d_display}</span>
-                <div class="thumbnails">
-                    {thumbnails_html}
-                </div>
-            </div>
-            <span class="arrow">→</span>
-        </a>
-        """
+        items_html += _build_date_item_html(d_path, svg_keys)
 
     if not items_html:
         items_html = "<p>No entries found yet.</p>"
 
-    html = INDEX_TEMPLATE.replace("$items", items_html)
+    # Pagination: link to archive index if more than 10 dates exist
+    total_pages = _calc_total_archive_pages(len(date_paths))
+    if total_pages > 0:
+        older_link = f'<a href="/view/index_{total_pages:04d}.html">← Older</a>'
+        pagination_html = f'{older_link}<span class="spacer"></span>'
+    else:
+        pagination_html = ""
+
+    html = _build_index_html(items_html, pagination_html, show_sync_button=True)
     await storage.put("index.html", html.encode("utf-8"), content_type="text/html")
-    _logger.info("Generated main index.html")
+    _logger.info("Generated index.html")
+
+
+def _calc_total_archive_pages(total_dates: int, page_size: int = 10) -> int:
+    """Calculate how many archive index pages are needed."""
+    if total_dates <= page_size:
+        return 0
+    # All dates go into archive pages; the last page overlaps with index.html
+    return (total_dates + page_size - 1) // page_size
+
+
+async def generate_archive_pages(storage: StorageProvider):
+    """
+    Generate paginated archive index pages (index_0001.html, index_0002.html, ...).
+
+    - Pages are numbered oldest-first (index_0001 = oldest 10 dates).
+    - Existing pages are skipped (immutable once written).
+    - The last page (highest number) is always regenerated as new dates may be added.
+    """
+    _logger.info("Generating archive pages...")
+
+    # Collect all dated index.html entries
+    all_keys = await storage.list("")
+    date_pattern = re.compile(r"^(\d{4}/\d{2}/\d{2})/index\.html$")
+    date_paths = sorted(
+        [m.group(1) for k in all_keys if (m := date_pattern.match(k))],
+        reverse=True,  # newest first
+    )
+
+    if not date_paths:
+        _logger.info("No dated pages found, skipping archive generation")
+        return
+
+    page_size = 10
+    total_pages = _calc_total_archive_pages(len(date_paths))
+    if total_pages == 0:
+        _logger.info("Not enough dates for archive pages yet")
+        return
+
+    # Split into chunks: oldest first (reverse the list, then chunk)
+    oldest_first = list(reversed(date_paths))
+    chunks = [oldest_first[i:i + page_size] for i in range(0, len(oldest_first), page_size)]
+
+    for page_num, chunk in enumerate(chunks, start=1):
+        filename = f"index_{page_num:04d}.html"
+
+        # Skip existing pages unless it's the last page (may have new dates added)
+        is_last_page = (page_num == len(chunks))
+        if not is_last_page and await storage.exists(filename):
+            _logger.info(f"Skipping existing archive page: {filename}")
+            continue
+
+        # Chunk is oldest-first; display newest-first in HTML
+        display_chunk = list(reversed(chunk))
+
+        items_html = ""
+        for d_path in display_chunk:
+            image_dir = f"{d_path}/images"
+            images = await storage.list(image_dir)
+            svg_keys = sorted([k for k in images if k.endswith(".svg")])[:4]
+            items_html += _build_date_item_html(d_path, svg_keys)
+
+        # Build pagination links
+        prev_link = ""
+        next_link = ""
+
+        if page_num > 1:
+            prev_filename = f"index_{page_num - 1:04d}.html"
+            prev_link = f'<a href="/view/{prev_filename}">← Older</a>'
+
+        if is_last_page:
+            next_link = '<a href="/view/index.html">Newer →</a>'
+        else:
+            next_filename = f"index_{page_num + 1:04d}.html"
+            next_link = f'<a href="/view/{next_filename}">Newer →</a>'
+
+        if prev_link and next_link:
+            pagination_html = f'{prev_link}<span class="spacer"></span>{next_link}'
+        elif prev_link:
+            pagination_html = f'<span class="spacer"></span>{prev_link}<span class="spacer"></span>'
+        else:
+            pagination_html = f'<span class="spacer"></span>{next_link}'
+
+        html = _build_index_html(items_html, pagination_html, show_sync_button=False)
+        await storage.put(filename, html.encode("utf-8"), content_type="text/html")
+        _logger.info(f"Generated archive page: {filename} ({len(display_chunk)} dates)")

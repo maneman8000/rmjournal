@@ -25,7 +25,7 @@ from cloud.cache import KVMetadataCache
 from storage.r2 import R2StorageProvider
 from journal.cli import JournalContext
 from journal.sync import process_journal
-from journal.web import generate_index_page
+from journal.web import generate_index_page, generate_archive_pages
 
 _logger = logging.getLogger(__name__)
 
@@ -75,9 +75,20 @@ class Default(WorkerEntrypoint):
 
         _logger.info(f"[sync] Journal sync complete for {target_date}")
 
+    async def _run_archive(self):
+        """Archive Cron handler: generate paginated archive index pages."""
+        _logger.info("[archive] Starting archive page generation")
+        storage = R2StorageProvider(self.env.R2_BUCKET)
+        await generate_archive_pages(storage)
+        _logger.info("[archive] Archive page generation complete")
+
     async def scheduled(self, controller, env=None, ctx=None):
-        """Cron Trigger handler."""
-        await self._run_sync(date.today())
+        """Cron Trigger handler. Dispatches to sync or archive based on cron schedule."""
+        cron = getattr(controller, "cron", "") if controller else ""
+        if cron == "0 15 * * *":
+            await self._run_archive()
+        else:
+            await self._run_sync(date.today())
 
     async def fetch(self, request):
         """

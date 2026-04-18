@@ -16,12 +16,13 @@
 	/**
 	 * Cron Triggers
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
-	 * 6時間ごとに実行 (UTC 0:00 / 6:00 / 12:00 / 18:00 = JST 9:00 / 15:00 / 21:00 / 3:00)
-	 * subrequest 制限のため複数回に分けてキャッシュミスを解消する
+	 * - 0 */6 * * *  : sync（6時間ごと）
+	 * - 0 15 * * *   : archive ページ生成（UTC 15:00 = JST 0:00）
 	 */
 	"triggers": {
 		"crons": [
-			"0 */6 * * *"
+			"0 */6 * * *",
+			"0 15 * * *"
 		]
 	},
 	/**
