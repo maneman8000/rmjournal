@@ -284,7 +284,10 @@ def _build_index_html(
 
 
 import re
-import json(target_date: date, storage: StorageProvider):
+import json
+
+
+async def generate_daily_page(target_date: date, storage: StorageProvider):
     """
     Generate an index.html for a specific date containing all journal images.
     """
