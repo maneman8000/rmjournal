@@ -161,6 +161,8 @@ class RemarkableClient:
             return None
 
         cached_doc = await self.cache.get(doc_id, entry.hash)
+        # DEBUG: log cache hit/miss for get_doc (remove after debugging)
+        _logger.info(f"  [DEBUG] get_doc {doc_id[:8]}... hash={entry.hash[:8]}... cache={'HIT' if cached_doc else 'MISS'}")
         if cached_doc:
             return cached_doc
 

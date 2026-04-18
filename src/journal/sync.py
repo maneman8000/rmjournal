@@ -40,6 +40,9 @@ async def process_journal(ctx: JournalContext):
     ]
 
     _logger.info(f"Found {len(target_docs)} documents modified on {ctx.target_date}")
+    # DEBUG: list all target docs (remove after debugging)
+    for d in target_docs:
+        _logger.info(f"  [DEBUG] target_doc: {d.visible_name} ({d.id}) last_modified={d.metadata.last_modified if d.metadata else 'N/A'}")
 
     doc_titles = {}
 
@@ -52,7 +55,12 @@ async def process_journal(ctx: JournalContext):
                 _logger.warning(f"Could not fetch full doc info for {doc.id}")
                 continue
 
+            # DEBUG: log entries count (remove after debugging)
+            _logger.info(f"  [DEBUG] full_doc.entries count: {len(full_doc.entries)} for {doc.visible_name}")
+
             processed_pages = await process_document_pages(ctx, full_doc)
+            # DEBUG: log processed pages (remove after debugging)
+            _logger.info(f"  [DEBUG] processed_pages: {processed_pages} for {doc.visible_name}")
             for page_id in processed_pages:
                 filename = f"{doc.id}_{page_id}.svg"
                 doc_titles[filename] = doc.visible_name
@@ -122,8 +130,8 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
         _logger.error(f"  Failed to parse .content for {doc.id}: {e}")
         return []
 
-    # 3. Build a map of entry ID -> hash for quick lookup
-    entry_map = {e.id: e.hash for e in doc.entries if e.type == "0"}
+    # DEBUG: log entry_map keys (remove after debugging)
+    _logger.info(f"  [DEBUG] entry_map keys sample: {list(entry_map.keys())[:5]}")
 
     processed_pages = []
 
@@ -135,8 +143,9 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
         if not page_id:
             continue
 
-        _logger.debug(
-            f"    Page {page_id} last_mod: {last_mod} (Parsed: {ms_to_date(last_mod)})"
+        # DEBUG: changed from debug to info temporarily (remove after debugging)
+        _logger.info(
+            f"    [DEBUG] Page {page_id[:8]}... last_mod: {last_mod} (Parsed: {ms_to_date(last_mod)}) target: {ctx.target_date} match: {ms_to_date(last_mod) == ctx.target_date}"
         )
 
         if ms_to_date(last_mod) != ctx.target_date:
