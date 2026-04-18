@@ -100,11 +100,15 @@ class RemarkableClient:
         for entry in root_entries:
             cached_doc = await self.cache.get(entry.id, entry.hash)
             if cached_doc:
+                # DEBUG: log cache hit (remove after debugging)
+                print(f"  [DEBUG] list_docs HIT: {entry.id[:8]}... hash={entry.hash[:8]}... name={cached_doc.visible_name}")
                 docs.append(cached_doc)
                 continue
 
             # キャッシュミス上限チェック
             if cache_miss_count >= MAX_CACHE_MISS_PER_RUN:
+                # DEBUG: log limit reached (remove after debugging)
+                print(f"  [DEBUG] list_docs LIMIT REACHED: miss_count={cache_miss_count}, skipping {entry.id[:8]}...")
                 _logger.warning(
                     f"Cache miss limit ({MAX_CACHE_MISS_PER_RUN}) reached in list_docs, "
                     f"deferring remaining docs to next run"
@@ -112,6 +116,8 @@ class RemarkableClient:
                 all_fetched = False
                 break
 
+            # DEBUG: log cache miss (remove after debugging)
+            print(f"  [DEBUG] list_docs MISS: {entry.id[:8]}... hash={entry.hash[:8]}... miss_count={cache_miss_count+1}")
             cache_miss_count += 1
             try:
                 doc_index_content = await self.get_blob(entry.hash)
