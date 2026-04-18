@@ -130,6 +130,9 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
         _logger.error(f"  Failed to parse .content for {doc.id}: {e}")
         return []
 
+    # 3. Build a map of entry ID -> hash for quick lookup
+    entry_map = {e.id: e.hash for e in doc.entries if e.type == "0"}
+
     # DEBUG: log entry_map keys (remove after debugging)
     _logger.info(f"  [DEBUG] entry_map keys sample: {list(entry_map.keys())[:5]}")
 
