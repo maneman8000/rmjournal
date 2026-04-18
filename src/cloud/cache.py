@@ -141,22 +141,16 @@ class KVMetadataCache(MetadataCache):
     async def prune(self, active_ids: List[str]):
         if self._kv is None:
             return
-        print(f"  [DEBUG] prune called with {len(active_ids)} active_ids")
         try:
             active_keys = {self._key(doc_id) for doc_id in active_ids}
             # KV.list() requires a JS object, not a Python dict
             from pyodide.ffi import to_js
             from js import Object
             js_options = to_js({"prefix": "meta:"}, dict_converter=Object.fromEntries)
-            print(f"  [DEBUG] prune calling kv.list()")
             result = await self._kv.list(js_options)
-            keys = list(result.keys)
-            print(f"  [DEBUG] prune kv.list returned {len(keys)} keys")
-            for item in keys:
+            for item in result.keys:
                 if item.name not in active_keys:
                     await self._kv.delete(item.name)
                     _logger.info(f"KV cache pruned: {item.name}")
-                    print(f"  [DEBUG] KV cache pruned: {item.name}")
         except Exception as e:
             _logger.warning(f"KV cache prune failed: {e}")
-            print(f"  [DEBUG] KV cache prune failed: {e}")

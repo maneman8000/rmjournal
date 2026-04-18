@@ -22,6 +22,12 @@ class RemarkableClient:
     ):
         self.auth = auth_manager
         self.cache = cache or KVMetadataCache()
+        # In-memory cache for the duration of a single Worker invocation.
+        # Prevents KV eventual consistency issues: if list_docs() writes a new
+        # entry to KV and get_doc() reads it back immediately, a different edge
+        # node may return a stale value. The in-memory cache guarantees that
+        # get_doc() always gets the freshest data seen in this invocation.
+        self._memory: Dict[str, BlobDoc] = {}
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         token = await self.auth.get_user_token()
@@ -82,6 +88,10 @@ class RemarkableClient:
         To stay within Cloudflare Workers' 50 subrequest limit, cache misses
         are capped at MAX_CACHE_MISS_PER_RUN per invocation. Uncached docs
         will be picked up on subsequent runs (Cron runs 6x/day).
+
+        Results are also stored in self._memory so that get_doc() can return
+        them immediately without hitting KV again (avoids eventual consistency
+        issues and saves subrequests).
         """
         MAX_CACHE_MISS_PER_RUN = 10
 
@@ -100,15 +110,12 @@ class RemarkableClient:
         for entry in root_entries:
             cached_doc = await self.cache.get(entry.id, entry.hash)
             if cached_doc:
-                # DEBUG: log cache hit (remove after debugging)
-                print(f"  [DEBUG] list_docs HIT: {entry.id[:8]}... hash={entry.hash[:8]}... name={cached_doc.visible_name}")
+                self._memory[entry.id] = cached_doc
                 docs.append(cached_doc)
                 continue
 
             # キャッシュミス上限チェック
             if cache_miss_count >= MAX_CACHE_MISS_PER_RUN:
-                # DEBUG: log limit reached (remove after debugging)
-                print(f"  [DEBUG] list_docs LIMIT REACHED: miss_count={cache_miss_count}, skipping {entry.id[:8]}...")
                 _logger.warning(
                     f"Cache miss limit ({MAX_CACHE_MISS_PER_RUN}) reached in list_docs, "
                     f"deferring remaining docs to next run"
@@ -116,8 +123,6 @@ class RemarkableClient:
                 all_fetched = False
                 break
 
-            # DEBUG: log cache miss (remove after debugging)
-            print(f"  [DEBUG] list_docs MISS: {entry.id[:8]}... hash={entry.hash[:8]}... miss_count={cache_miss_count+1}")
             cache_miss_count += 1
             try:
                 doc_index_content = await self.get_blob(entry.hash)
@@ -134,10 +139,11 @@ class RemarkableClient:
                     doc.metadata = MetaItem.from_dict(meta_data)
 
                 await self.cache.set(entry.id, doc)
+                self._memory[entry.id] = doc
                 docs.append(doc)
             except httpx.TransportError as e:
                 _logger.warning(
-                    f"Subrequest limit reached during list_docs ({e}), "
+                    f"Network error during list_docs ({e}), "
                     f"returning {len(docs)} docs fetched so far"
                 )
                 all_fetched = False
@@ -153,7 +159,18 @@ class RemarkableClient:
         return docs
 
     async def get_doc(self, doc_id: str) -> Optional[BlobDoc]:
-        """Fetch a single document's metadata (uses cache)."""
+        """
+        Fetch a single document's metadata.
+
+        Checks self._memory first (populated by list_docs()) to avoid KV
+        eventual consistency issues and to save subrequests.
+        Falls back to KV cache, then reMarkable API.
+        """
+        # 1. In-memory cache (fastest, avoids KV eventual consistency)
+        if doc_id in self._memory:
+            return self._memory[doc_id]
+
+        # 2. KV cache + reMarkable API fallback
         root_info = await self.get_root_info()
         root_hash = root_info.get("hash") or root_info.get("Hash")
         if not root_hash:
@@ -167,9 +184,8 @@ class RemarkableClient:
             return None
 
         cached_doc = await self.cache.get(doc_id, entry.hash)
-        # DEBUG: log cache hit/miss for get_doc (remove after debugging)
-        print(f"  [DEBUG] get_doc {doc_id[:8]}... hash={entry.hash[:8]}... cache={'HIT' if cached_doc else 'MISS'}")
         if cached_doc:
+            self._memory[doc_id] = cached_doc
             return cached_doc
 
         try:
@@ -187,6 +203,7 @@ class RemarkableClient:
                 doc.metadata = MetaItem.from_dict(meta_data)
 
             await self.cache.set(doc_id, doc)
+            self._memory[doc_id] = doc
             return doc
         except Exception as e:
             _logger.error(f"Error fetching doc {doc_id}: {e}")
