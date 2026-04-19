@@ -102,7 +102,7 @@ class Default(WorkerEntrypoint):
 
     # TEST: Queue Consumer ハンドラ（動作確認後に削除）
     # Queue から受け取ったメッセージを R2 の tmp/ に書き込む
-    async def queue(self, batch, env):
+    async def queue(self, batch, env=None, ctx=None):
         """Queue Consumer test handler."""
         storage = R2StorageProvider(self.env.R2_BUCKET)
         for message in batch.messages:
