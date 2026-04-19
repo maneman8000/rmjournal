@@ -86,6 +86,40 @@ async def process_journal(ctx: JournalContext):
         )
 
     await generate_daily_page(ctx.target_date, ctx.storage)
+    await _update_dates_index(ctx.target_date, ctx.storage)
+
+
+async def _update_dates_index(target_date: date, storage):
+    """
+    Update dates.json in R2 with the target date.
+    dates.json holds a sorted (newest first) list of all dated journal entries.
+    """
+    date_str = target_date.strftime("%Y/%m/%d")
+
+    # Check if the daily page was actually generated
+    daily_key = f"{date_str}/index.html"
+    if not await storage.exists(daily_key):
+        _logger.info(f"No daily page for {date_str}, skipping dates.json update")
+        return
+
+    # Load existing dates
+    existing: list = []
+    if await storage.exists("dates.json"):
+        try:
+            existing = json.loads((await storage.get("dates.json")).decode("utf-8"))
+        except Exception as e:
+            _logger.warning(f"Failed to load dates.json: {e}")
+
+    if date_str in existing:
+        return  # Already listed, no update needed
+
+    updated = sorted(set(existing + [date_str]), reverse=True)
+    await storage.put(
+        "dates.json",
+        json.dumps(updated, ensure_ascii=False).encode("utf-8"),
+        content_type="application/json",
+    )
+    _logger.info(f"Updated dates.json: added {date_str} ({len(updated)} total)")
 
 
 async def process_document_pages(ctx: JournalContext, doc: BlobDoc):

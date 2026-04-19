@@ -346,20 +346,37 @@ async def generate_daily_page(target_date: date, storage: StorageProvider):
     _logger.info(f"Generated daily page: {date_path}/index.html")
 
 
+async def _load_date_paths(storage: StorageProvider) -> list:
+    """
+    Load the list of dated journal entries from dates.json in R2.
+    Falls back to R2 full scan if dates.json is not found.
+    Returns a list of date paths sorted newest-first (e.g. ["2026/04/19", ...]).
+    """
+    if await storage.exists("dates.json"):
+        try:
+            return json.loads((await storage.get("dates.json")).decode("utf-8"))
+        except Exception as e:
+            _logger.warning(f"Failed to load dates.json, falling back to R2 scan: {e}")
+
+    # Fallback: full R2 scan (slow but safe)
+    _logger.info("dates.json not found, scanning R2...")
+    all_keys = await storage.list("")
+    date_pattern = re.compile(r"^(\d{4}/\d{2}/\d{2})/index\.html$")
+    return sorted(
+        [m.group(1) for k in all_keys if (m := date_pattern.match(k))],
+        reverse=True,
+    )
+
+
 async def generate_index_page(storage: StorageProvider):
     """
     Generate index.html with the latest 10 dates.
     SVG thumbnails are referenced via <img> tags (no inline embedding).
+    Uses dates.json for efficient date listing instead of R2 full scan.
     """
     _logger.info("Generating index.html (latest 10 dates)...")
 
-    # Collect all dated index.html entries from R2
-    all_keys = await storage.list("")
-    date_pattern = re.compile(r"^(\d{4}/\d{2}/\d{2})/index\.html$")
-    date_paths = sorted(
-        [m.group(1) for k in all_keys if (m := date_pattern.match(k))],
-        reverse=True,
-    )
+    date_paths = await _load_date_paths(storage)
 
     # Latest 10 only
     latest = date_paths[:10]
@@ -402,16 +419,11 @@ async def generate_archive_pages(storage: StorageProvider):
     - Pages are numbered oldest-first (index_0001 = oldest 10 dates).
     - Existing pages are skipped (immutable once written).
     - The last page (highest number) is always regenerated as new dates may be added.
+    - Uses dates.json for efficient date listing instead of R2 full scan.
     """
     _logger.info("Generating archive pages...")
 
-    # Collect all dated index.html entries
-    all_keys = await storage.list("")
-    date_pattern = re.compile(r"^(\d{4}/\d{2}/\d{2})/index\.html$")
-    date_paths = sorted(
-        [m.group(1) for k in all_keys if (m := date_pattern.match(k))],
-        reverse=True,  # newest first
-    )
+    date_paths = await _load_date_paths(storage)
 
     if not date_paths:
         _logger.info("No dated pages found, skipping archive generation")
