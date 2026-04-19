@@ -108,14 +108,14 @@ class Default(WorkerEntrypoint):
         for message in batch.messages:
             try:
                 body = message.body
-                # body は JsProxy の可能性があるため to_py で Python dict に変換
+                # body は JsProxy（JS オブジェクト）なので属性アクセスで取得する
+                # Python dict ではないため .get() は使えない
                 try:
-                    from pyodide.ffi import to_py
-                    body = to_py(body)
+                    triggered_at = str(getattr(body, "triggered_at", None) or "unknown")
+                    target_date = str(getattr(body, "target_date", None) or "unknown")
                 except Exception:
-                    pass
-                triggered_at = str(body.get("triggered_at", "unknown")) if isinstance(body, dict) else "unknown"
-                target_date = str(body.get("target_date", "unknown")) if isinstance(body, dict) else "unknown"
+                    triggered_at = "unknown"
+                    target_date = "unknown"
                 key = f"tmp/queue-test/{triggered_at}.txt"
                 content = (
                     f"Queue consumer executed successfully\n"
