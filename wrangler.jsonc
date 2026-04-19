@@ -70,11 +70,9 @@
 				"max_batch_timeout": 0
 			}
 		]
-	},
-	// Extend CPU time for Queue Consumer (TEST)
-	"limits": {
-		"cpu_ms": 30000
 	}
+	// limits.cpu_ms は Paid プランのみ設定可能
+	// "limits": { "cpu_ms": 30000 }
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/
