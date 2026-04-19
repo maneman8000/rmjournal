@@ -21,7 +21,7 @@ def ms_to_date(ms_str: str) -> date:
         return date(1970, 1, 1)
 
 
-async def process_journal(ctx: JournalContext):
+async def process_journal(ctx: JournalContext) -> bool:
     """
     Main processing loop.
 
@@ -30,9 +30,11 @@ async def process_journal(ctx: JournalContext):
 
     If ctx.render_queue is set, SVG rendering is offloaded to the Queue Consumer.
     In that case, .rm files are saved to R2 tmp/ and a single Queue message is sent.
-    generate_daily_page() will be called by the Queue Consumer after rendering completes.
+    generate_daily_page() and generate_index_page() will be called by the Queue Consumer
+    after rendering completes.
 
-    If ctx.render_queue is None (local / fallback mode), rendering is performed inline.
+    Returns True if a Queue message was successfully sent (caller should NOT call
+    generate_index_page()), False otherwise (caller should call generate_index_page()).
     """
     _logger.info("Fetching document list...")
     all_docs = await ctx.client.list_docs()
@@ -120,6 +122,8 @@ async def process_journal(ctx: JournalContext):
                 _logger.info(
                     f"[queue] Sent {len(tmp_keys)} pages to render queue for {ctx.target_date}"
                 )
+                # Queue Consumer が generate_daily_page / generate_index_page を実行する
+                return True
             except Exception as e:
                 _logger.error(f"[queue] Failed to send render queue message: {e}")
                 # Fallback: render inline
@@ -134,17 +138,18 @@ async def process_journal(ctx: JournalContext):
                     except Exception as ex:
                         _logger.error(f"[queue] Fallback render failed for {tmp_key}: {ex}")
                 await generate_daily_page(ctx.target_date, ctx.storage)
+                await _update_dates_index(ctx.target_date, ctx.storage)
+                return False
         else:
             # No pages to render today: generate daily page inline and update dates
             await generate_daily_page(ctx.target_date, ctx.storage)
             await _update_dates_index(ctx.target_date, ctx.storage)
+            return False
     else:
         # Inline mode: generate daily page and update dates immediately
         await generate_daily_page(ctx.target_date, ctx.storage)
         await _update_dates_index(ctx.target_date, ctx.storage)
-
-    # Note: when render_queue is set and tmp_keys exist,
-    # _update_dates_index() is called by the Queue Consumer after generate_daily_page()
+        return False
 
 
 async def _collect_pages_for_queue(

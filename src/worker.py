@@ -75,8 +75,12 @@ class Default(WorkerEntrypoint):
             client=client,
             render_queue=self.env.RENDER_QUEUE,
         )
-        await process_journal(ctx)
-        await generate_index_page(storage)
+        queued = await process_journal(ctx)
+        # generate_index_page() はページが Queue に送られた場合は Queue Consumer 側で実行する
+        # Queue Consumer 側で SVG が揃ってから生成することでサムネイルが最新になる
+        # Queue を使わなかった場合（当日変更なし or インラインモード）はここで実行する
+        if not queued:
+            await generate_index_page(storage)
 
         _logger.info(f"[sync] Journal sync complete for {target_date}")
 
@@ -98,7 +102,7 @@ class Default(WorkerEntrypoint):
         from renderer.svg import rm_content_to_svg
         from renderer.canvas import PAPER_PRO
         from exporter import export_svg_to_storage
-        from journal.web import generate_daily_page
+        from journal.web import generate_daily_page, generate_index_page
         from journal.sync import _update_dates_index
         from datetime import date as date_type
 
@@ -128,11 +132,12 @@ class Default(WorkerEntrypoint):
                     await storage.delete(tmp_key)
                     _logger.info(f"[queue] Rendered and saved: {image_key}")
 
-                # 全ページ完了後に daily page を生成し、dates.json を更新
+                # 全ページ完了後に daily page を生成し、dates.json を更新、index.html を再生成
                 target_date = date_type.fromisoformat(target_date_str)
                 await generate_daily_page(target_date, storage)
                 await _update_dates_index(target_date, storage)
-                _logger.info(f"[queue] Generated daily page and updated dates.json for {target_date_str}")
+                await generate_index_page(storage)
+                _logger.info(f"[queue] Generated daily page, updated dates.json, regenerated index.html for {target_date_str}")
 
                 message.ack()
             except Exception as e:
