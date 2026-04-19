@@ -135,13 +135,16 @@ async def process_journal(ctx: JournalContext):
                         _logger.error(f"[queue] Fallback render failed for {tmp_key}: {ex}")
                 await generate_daily_page(ctx.target_date, ctx.storage)
         else:
-            # No pages to render today
+            # No pages to render today: generate daily page inline and update dates
             await generate_daily_page(ctx.target_date, ctx.storage)
+            await _update_dates_index(ctx.target_date, ctx.storage)
     else:
-        # Inline mode: generate daily page immediately
+        # Inline mode: generate daily page and update dates immediately
         await generate_daily_page(ctx.target_date, ctx.storage)
+        await _update_dates_index(ctx.target_date, ctx.storage)
 
-    await _update_dates_index(ctx.target_date, ctx.storage)
+    # Note: when render_queue is set and tmp_keys exist,
+    # _update_dates_index() is called by the Queue Consumer after generate_daily_page()
 
 
 async def _collect_pages_for_queue(

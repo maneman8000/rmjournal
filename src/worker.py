@@ -92,12 +92,14 @@ class Default(WorkerEntrypoint):
         Queue Consumer: SVG レンダリングを Queue で実行する。
         Cron Worker が R2 tmp/ に保存した .rm ファイルを読み込み、
         SVG に変換して R2 に保存する。
-        全ページのレンダリング完了後に generate_daily_page() を呼ぶ。
+        全ページのレンダリング完了後に generate_daily_page() と
+        _update_dates_index() を呼ぶ。
         """
         from renderer.svg import rm_content_to_svg
         from renderer.canvas import PAPER_PRO
         from exporter import export_svg_to_storage
         from journal.web import generate_daily_page
+        from journal.sync import _update_dates_index
         from datetime import date as date_type
 
         storage = R2StorageProvider(self.env.R2_BUCKET)
@@ -126,10 +128,11 @@ class Default(WorkerEntrypoint):
                     await storage.delete(tmp_key)
                     _logger.info(f"[queue] Rendered and saved: {image_key}")
 
-                # 全ページ完了後に daily page を生成
+                # 全ページ完了後に daily page を生成し、dates.json を更新
                 target_date = date_type.fromisoformat(target_date_str)
                 await generate_daily_page(target_date, storage)
-                _logger.info(f"[queue] Generated daily page for {target_date_str}")
+                await _update_dates_index(target_date, storage)
+                _logger.info(f"[queue] Generated daily page and updated dates.json for {target_date_str}")
 
                 message.ack()
             except Exception as e:
