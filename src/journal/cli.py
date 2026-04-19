@@ -15,11 +15,18 @@ class JournalContext:
     """
 
     def __init__(
-        self, target_date: date, storage: StorageProvider, client: RemarkableClient
+        self,
+        target_date: date,
+        storage: StorageProvider,
+        client: RemarkableClient,
+        render_queue=None,
     ):
         self.target_date = target_date
         self.storage = storage
         self.client = client
+        # Cloudflare Queue binding for offloading SVG rendering to Queue Consumer.
+        # If None, SVG rendering is performed inline (local / fallback mode).
+        self.render_queue = render_queue
         _logger.info(f"Journal context initialized for date: {self.target_date}")
 
 

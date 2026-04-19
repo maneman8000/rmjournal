@@ -69,7 +69,12 @@ class Default(WorkerEntrypoint):
         client = RemarkableClient(auth_manager=auth, cache=cache)
         storage = R2StorageProvider(self.env.R2_BUCKET)
 
-        ctx = JournalContext(target_date=target_date, storage=storage, client=client)
+        ctx = JournalContext(
+            target_date=target_date,
+            storage=storage,
+            client=client,
+            render_queue=self.env.RENDER_QUEUE,
+        )
         await process_journal(ctx)
         await generate_index_page(storage)
 
@@ -81,6 +86,55 @@ class Default(WorkerEntrypoint):
         storage = R2StorageProvider(self.env.R2_BUCKET)
         await generate_archive_pages(storage)
         _logger.info("[archive] Archive page generation complete")
+
+    async def queue(self, batch, env=None, ctx=None):
+        """
+        Queue Consumer: SVG レンダリングを Queue で実行する。
+        Cron Worker が R2 tmp/ に保存した .rm ファイルを読み込み、
+        SVG に変換して R2 に保存する。
+        全ページのレンダリング完了後に generate_daily_page() を呼ぶ。
+        """
+        from renderer.svg import rm_content_to_svg
+        from renderer.canvas import PAPER_PRO
+        from exporter import export_svg_to_storage
+        from journal.web import generate_daily_page
+        from datetime import date as date_type
+
+        storage = R2StorageProvider(self.env.R2_BUCKET)
+
+        for message in batch.messages:
+            try:
+                body = message.body
+                # body は JsProxy なので getattr でアクセス、リストは list() でアンラップ
+                target_date_str = str(getattr(body, "target_date"))
+                tmp_keys = [str(k) for k in list(getattr(body, "tmp_keys"))]
+                image_keys = [str(k) for k in list(getattr(body, "image_keys"))]
+
+                _logger.info(
+                    f"[queue] Rendering {len(tmp_keys)} pages for {target_date_str}"
+                )
+
+                # 全ページをレンダリング
+                for tmp_key, image_key in zip(tmp_keys, image_keys):
+                    rm_content = await storage.get(tmp_key)
+                    if rm_content is None:
+                        _logger.warning(f"[queue] tmp file not found: {tmp_key}")
+                        continue
+
+                    svg_data = rm_content_to_svg(rm_content, dim=PAPER_PRO)
+                    await export_svg_to_storage(svg_data, storage, image_key)
+                    await storage.delete(tmp_key)
+                    _logger.info(f"[queue] Rendered and saved: {image_key}")
+
+                # 全ページ完了後に daily page を生成
+                target_date = date_type.fromisoformat(target_date_str)
+                await generate_daily_page(target_date, storage)
+                _logger.info(f"[queue] Generated daily page for {target_date_str}")
+
+                message.ack()
+            except Exception as e:
+                _logger.error(f"[queue] Failed to process message: {e}")
+                message.retry()
 
     async def scheduled(self, controller, env=None, ctx=None):
         """Cron Trigger handler. Dispatches to sync or archive based on cron schedule."""
