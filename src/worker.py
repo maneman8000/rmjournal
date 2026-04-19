@@ -76,7 +76,8 @@ class Default(WorkerEntrypoint):
         _logger.info(f"[sync] Journal sync complete for {target_date}")
 
         # TEST: Queue 動作検証用（確認後に削除）
-        # /trigger 実行後に Queue にメッセージを送り、Consumer が R2 に書き込めるか確認する
+        # JS Array のアンラップ確認: tmp_keys / image_keys をリストとして送信し
+        # Consumer 側で list() でアンラップできるかを検証する
         try:
             from pyodide.ffi import to_js
             from js import Object
@@ -85,6 +86,8 @@ class Default(WorkerEntrypoint):
                     "test": True,
                     "target_date": str(target_date),
                     "triggered_at": datetime.utcnow().isoformat(),
+                    "tmp_keys": ["tmp/test/key_a.rm", "tmp/test/key_b.rm"],
+                    "image_keys": ["tmp/test/img_a.svg", "tmp/test/img_b.svg"],
                 },
                 dict_converter=Object.fromEntries,
             )
@@ -101,26 +104,37 @@ class Default(WorkerEntrypoint):
         _logger.info("[archive] Archive page generation complete")
 
     # TEST: Queue Consumer ハンドラ（動作確認後に削除）
-    # Queue から受け取ったメッセージを R2 の tmp/ に書き込む
+    # JS Array のアンラップ確認: tmp_keys / image_keys を list() でアンラップできるか検証
     async def queue(self, batch, env=None, ctx=None):
-        """Queue Consumer test handler."""
+        """Queue Consumer test handler: verify JS Array unwrapping."""
         storage = R2StorageProvider(self.env.R2_BUCKET)
         for message in batch.messages:
             try:
                 body = message.body
-                # body は JsProxy（JS オブジェクト）なので属性アクセスで取得する
-                # Python dict ではないため .get() は使えない
+                triggered_at = str(getattr(body, "triggered_at", None) or "unknown")
+                target_date = str(getattr(body, "target_date", None) or "unknown")
+
+                # TEST: JS Array を list() でアンラップできるか確認
+                tmp_keys_raw = getattr(body, "tmp_keys", None)
+                image_keys_raw = getattr(body, "image_keys", None)
                 try:
-                    triggered_at = str(getattr(body, "triggered_at", None) or "unknown")
-                    target_date = str(getattr(body, "target_date", None) or "unknown")
-                except Exception:
-                    triggered_at = "unknown"
-                    target_date = "unknown"
+                    tmp_keys = list(tmp_keys_raw) if tmp_keys_raw is not None else []
+                    image_keys = list(image_keys_raw) if image_keys_raw is not None else []
+                    array_unwrap_result = "SUCCESS"
+                except Exception as ex:
+                    tmp_keys = []
+                    image_keys = []
+                    array_unwrap_result = f"FAILED: {ex}"
+
                 key = f"tmp/queue-test/{triggered_at}.txt"
                 content = (
                     f"Queue consumer executed successfully\n"
                     f"target_date={target_date}\n"
                     f"triggered_at={triggered_at}\n"
+                    f"array_unwrap={array_unwrap_result}\n"
+                    f"tmp_keys={tmp_keys}\n"
+                    f"image_keys={image_keys}\n"
+                    f"tmp_keys type={type(tmp_keys).__name__}\n"
                 )
                 await storage.put(key, content.encode("utf-8"), content_type="text/plain")
                 _logger.info(f"[queue-test] Wrote {key}")
