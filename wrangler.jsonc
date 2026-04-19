@@ -52,6 +52,29 @@
 	 * - RM_DEVICE_TOKEN
 	 * - RM_USER_TOKEN
 	 */
+
+	// Queue bindings (TEST: verify Python Workers queue() handler support)
+	// Producer binding for sending render jobs
+	// Consumer configured to process messages from the same worker
+	"queues": {
+		"producers": [
+			{
+				"binding": "RENDER_QUEUE",
+				"queue": "rmjournal-render-queue"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "rmjournal-render-queue",
+				"max_batch_size": 1,
+				"max_batch_timeout": 0
+			}
+		]
+	},
+	// Extend CPU time for Queue Consumer (TEST)
+	"limits": {
+		"cpu_ms": 30000
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/

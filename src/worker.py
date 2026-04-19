@@ -75,12 +75,59 @@ class Default(WorkerEntrypoint):
 
         _logger.info(f"[sync] Journal sync complete for {target_date}")
 
+        # TEST: Queue 動作検証用（確認後に削除）
+        # /trigger 実行後に Queue にメッセージを送り、Consumer が R2 に書き込めるか確認する
+        try:
+            from pyodide.ffi import to_js
+            from js import Object
+            msg = to_js(
+                {
+                    "test": True,
+                    "target_date": str(target_date),
+                    "triggered_at": datetime.utcnow().isoformat(),
+                },
+                dict_converter=Object.fromEntries,
+            )
+            await self.env.RENDER_QUEUE.send(msg)
+            _logger.info("[queue-test] Message sent to RENDER_QUEUE")
+        except Exception as e:
+            _logger.warning(f"[queue-test] Failed to send to queue: {e}")
+
     async def _run_archive(self):
         """Archive Cron handler: generate paginated archive index pages."""
         _logger.info("[archive] Starting archive page generation")
         storage = R2StorageProvider(self.env.R2_BUCKET)
         await generate_archive_pages(storage)
         _logger.info("[archive] Archive page generation complete")
+
+    # TEST: Queue Consumer ハンドラ（動作確認後に削除）
+    # Queue から受け取ったメッセージを R2 の tmp/ に書き込む
+    async def queue(self, batch, env):
+        """Queue Consumer test handler."""
+        storage = R2StorageProvider(self.env.R2_BUCKET)
+        for message in batch.messages:
+            try:
+                body = message.body
+                # body は JsProxy の可能性があるため to_py で Python dict に変換
+                try:
+                    from pyodide.ffi import to_py
+                    body = to_py(body)
+                except Exception:
+                    pass
+                triggered_at = str(body.get("triggered_at", "unknown")) if isinstance(body, dict) else "unknown"
+                target_date = str(body.get("target_date", "unknown")) if isinstance(body, dict) else "unknown"
+                key = f"tmp/queue-test/{triggered_at}.txt"
+                content = (
+                    f"Queue consumer executed successfully\n"
+                    f"target_date={target_date}\n"
+                    f"triggered_at={triggered_at}\n"
+                )
+                await storage.put(key, content.encode("utf-8"), content_type="text/plain")
+                _logger.info(f"[queue-test] Wrote {key}")
+                message.ack()
+            except Exception as e:
+                _logger.error(f"[queue-test] Failed to process message: {e}")
+                message.retry()
 
     async def scheduled(self, controller, env=None, ctx=None):
         """Cron Trigger handler. Dispatches to sync or archive based on cron schedule."""
