@@ -61,9 +61,14 @@ def _cache_control(r2_key: str) -> str:
     # SVG images: long cache, cache-busted via ?v= when re-rendered
     if "/images/" in r2_key and r2_key.endswith(".svg"):
         return "private, max-age=86400"
-    # Daily pages: short cache (may be updated same day)
-    if re.match(r"\d{4}/\d{2}/\d{2}/index\.html$", r2_key):
-        return "private, max-age=300"
+    # Daily pages: short cache for today (may be updated), long cache for past dates
+    m = re.match(r"(\d{4}/\d{2}/\d{2})/index\.html$", r2_key)
+    if m:
+        page_date = m.group(1)  # "YYYY/MM/DD"
+        today = date.today().strftime("%Y/%m/%d")
+        if page_date == today:
+            return "private, max-age=300"   # 5分（当日は sync で更新される）
+        return "private, max-age=86400"     # 24時間（過去は更新されない）
     # Main index: short cache (updated on each sync)
     if r2_key == "index.html":
         return "private, max-age=300"
