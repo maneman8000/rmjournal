@@ -249,12 +249,15 @@ SYNC_SCRIPT_HTML = """<script>
     </script>"""
 
 
-def _build_date_item_html(d_path: str, image_keys: list) -> str:
+def _build_date_item_html(d_path: str, image_keys: list, rendered_image_keys=None, rendered_at: int = 0) -> str:
     """Build HTML for a single date entry with <img> thumbnails."""
     d_display = d_path.replace("/", "-")
     thumbnails_html = ""
     for img_key in image_keys[:4]:
         img_src = f"/view/{img_key}"
+        # Cache-busting for newly rendered images
+        if rendered_image_keys and img_key in rendered_image_keys and rendered_at:
+            img_src += f"?v={rendered_at}"
         thumbnails_html += f'<div class="thumb"><img src="{img_src}" loading="lazy" alt=""></div>'
 
     return f"""
@@ -287,9 +290,17 @@ import re
 import json
 
 
-async def generate_daily_page(target_date: date, storage: StorageProvider):
+async def generate_daily_page(
+    target_date: date,
+    storage: StorageProvider,
+    rendered_image_keys=None,
+    rendered_at: int = 0,
+):
     """
     Generate an index.html for a specific date containing all journal images.
+    SVG images are referenced via <img> tags.
+    If rendered_image_keys is provided, those images get a ?v=<rendered_at>
+    cache-busting parameter to ensure browsers fetch the latest version.
     """
     date_path = target_date.strftime("%Y/%m/%d")
 
@@ -314,22 +325,19 @@ async def generate_daily_page(target_date: date, storage: StorageProvider):
 
     content_html = ""
     for s_key in svg_keys:
-        svg_content = (await storage.get(s_key)).decode("utf-8")
-        # Remove XML declaration and DOCTYPE if present for cleaner embedding
-        if "<?xml" in svg_content:
-            svg_content = svg_content[svg_content.find(">") + 1 :].strip()
-        if "<!DOCTYPE" in svg_content:
-            svg_content = svg_content[svg_content.find(">") + 1 :].strip()
-
-        # Extract original filename to match with metadata
         filename = s_key.split("/")[-1]
         title = metadata.get(filename, filename)
+
+        # Cache-busting: add ?v= for newly rendered images
+        img_src = f"/view/{s_key}"
+        if rendered_image_keys and s_key in rendered_image_keys and rendered_at:
+            img_src += f"?v={rendered_at}"
 
         content_html += f"""
         <div class="page-item">
             <div class="page-metadata">{title}</div>
             <div class="svg-wrapper">
-                {svg_content}
+                <img src="{img_src}" alt="{title}" style="width:100%;height:auto;">
             </div>
         </div>
         """
@@ -368,11 +376,12 @@ async def _load_date_paths(storage: StorageProvider) -> list:
     )
 
 
-async def generate_index_page(storage: StorageProvider):
+async def generate_index_page(storage: StorageProvider, rendered_image_keys=None, rendered_at: int = 0):
     """
     Generate index.html with the latest 10 dates.
     SVG thumbnails are referenced via <img> tags (no inline embedding).
     Uses dates.json for efficient date listing instead of R2 full scan.
+    If rendered_image_keys is provided, those thumbnails get ?v= cache-busting.
     """
     _logger.info("Generating index.html (latest 10 dates)...")
 
@@ -386,7 +395,7 @@ async def generate_index_page(storage: StorageProvider):
         image_dir = f"{d_path}/images"
         images = await storage.list(image_dir)
         svg_keys = sorted([k for k in images if k.endswith(".svg")])[:4]
-        items_html += _build_date_item_html(d_path, svg_keys)
+        items_html += _build_date_item_html(d_path, svg_keys, rendered_image_keys=rendered_image_keys, rendered_at=rendered_at)
 
     if not items_html:
         items_html = "<p>No entries found yet.</p>"

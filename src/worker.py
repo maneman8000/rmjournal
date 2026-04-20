@@ -9,8 +9,9 @@ Handles:
 """
 
 import logging
+import re
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Set
 from urllib.parse import urlparse, parse_qs
 
 # rmscene は新しいフォーマットのファイルに対して warning を出すことがあるが
@@ -53,6 +54,24 @@ def _get_cookie_token(request) -> Optional[str]:
         if part.startswith("rmjournal_token="):
             return part[len("rmjournal_token=") :]
     return None
+
+
+def _cache_control(r2_key: str) -> str:
+    """Return appropriate Cache-Control header based on file type/path."""
+    # SVG images: long cache, cache-busted via ?v= when re-rendered
+    if "/images/" in r2_key and r2_key.endswith(".svg"):
+        return "private, max-age=86400"
+    # Daily pages: short cache (may be updated same day)
+    if re.match(r"\d{4}/\d{2}/\d{2}/index\.html$", r2_key):
+        return "private, max-age=300"
+    # Main index: short cache (updated on each sync)
+    if r2_key == "index.html":
+        return "private, max-age=300"
+    # Archive pages: long cache (updated once a day)
+    if re.match(r"index_\d{4}\.html$", r2_key):
+        return "private, max-age=86400"
+    # Default: short cache
+    return "private, max-age=300"
 
 
 class Default(WorkerEntrypoint):
@@ -121,6 +140,9 @@ class Default(WorkerEntrypoint):
                 )
 
                 # 全ページをレンダリング
+                rendered_at = int(datetime.utcnow().timestamp())
+                rendered_image_keys: Set[str] = set()
+
                 for tmp_key, image_key in zip(tmp_keys, image_keys):
                     rm_content = await storage.get(tmp_key)
                     if rm_content is None:
@@ -130,13 +152,14 @@ class Default(WorkerEntrypoint):
                     svg_data = rm_content_to_svg(rm_content, dim=PAPER_PRO)
                     await export_svg_to_storage(svg_data, storage, image_key)
                     await storage.delete(tmp_key)
+                    rendered_image_keys.add(image_key)
                     _logger.info(f"[queue] Rendered and saved: {image_key}")
 
                 # 全ページ完了後に daily page を生成し、dates.json を更新、index.html を再生成
                 target_date = date_type.fromisoformat(target_date_str)
-                await generate_daily_page(target_date, storage)
+                await generate_daily_page(target_date, storage, rendered_image_keys=rendered_image_keys, rendered_at=rendered_at)
                 await _update_dates_index(target_date, storage)
-                await generate_index_page(storage)
+                await generate_index_page(storage, rendered_image_keys=rendered_image_keys, rendered_at=rendered_at)
                 _logger.info(f"[queue] Generated daily page, updated dates.json, regenerated index.html for {target_date_str}")
 
                 message.ack()
@@ -226,12 +249,13 @@ class Default(WorkerEntrypoint):
                 return Response("Not Found", status=404)
 
             ct = _content_type(r2_key)
+            cc = _cache_control(r2_key)
             # Text formats: decode to string and return directly
             if ct.startswith("text/") or ct in ("image/svg+xml", "application/json"):
-                return Response(data.decode("utf-8"), headers={"Content-Type": ct})
+                return Response(data.decode("utf-8"), headers={"Content-Type": ct, "Cache-Control": cc})
             # Binary formats: convert to JS Uint8Array
             from js import Uint8Array
 
-            return Response(Uint8Array.new(data), headers={"Content-Type": ct})
+            return Response(Uint8Array.new(data), headers={"Content-Type": ct, "Cache-Control": cc})
 
         return Response("Not Found", status=404)
