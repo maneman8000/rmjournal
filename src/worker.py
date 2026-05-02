@@ -27,6 +27,7 @@ from storage.r2 import R2StorageProvider
 from journal.cli import JournalContext
 from journal.sync import process_journal
 from journal.web import generate_index_page, generate_archive_pages
+from journal.notify import check_and_notify
 
 _logger = logging.getLogger(__name__)
 
@@ -115,6 +116,24 @@ class Default(WorkerEntrypoint):
         await generate_archive_pages(storage)
         _logger.info("[archive] Archive page generation complete")
 
+    async def _run_notify(self):
+        """Notify Cron handler: warn about documents approaching 50 days without edits."""
+        _logger.info("[notify] Starting stale document check")
+        auth = AuthManager(
+            device_token=self.env.RM_DEVICE_TOKEN,
+            user_token=self.env.RM_USER_TOKEN,
+            kv_namespace=self.env.RMJOURNAL_AUTH,
+        )
+        from cloud.cache import KVMetadataCache
+        cache = KVMetadataCache(kv_namespace=self.env.RMJOURNAL_CACHE)
+        client = RemarkableClient(auth_manager=auth, cache=cache)
+        webhook_url = str(self.env.NOTIFY_WEBHOOK_URL)
+        count = await check_and_notify(client=client, webhook_url=webhook_url)
+        if count:
+            _logger.info(f"[notify] Notified for {count} stale document(s)")
+        else:
+            _logger.info("[notify] No stale documents found")
+
     async def queue(self, batch, env=None, ctx=None):
         """
         Queue Consumer: SVG レンダリングを Queue で実行する。
@@ -173,10 +192,12 @@ class Default(WorkerEntrypoint):
                 message.retry()
 
     async def scheduled(self, controller, env=None, ctx=None):
-        """Cron Trigger handler. Dispatches to sync or archive based on cron schedule."""
+        """Cron Trigger handler. Dispatches to sync, archive, or notify based on cron schedule."""
         cron = getattr(controller, "cron", "") if controller else ""
         if cron == "0 15 * * *":
             await self._run_archive()
+        elif cron == "5 0 * * *":
+            await self._run_notify()
         else:
             await self._run_sync(date.today())
 
