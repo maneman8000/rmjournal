@@ -169,7 +169,7 @@ async def _collect_pages_for_queue(
         return []
 
     try:
-        content_bytes = await ctx.client.get_blob(content_entry.hash)
+        content_bytes = await ctx.client.get_blob(content_entry.hash, content_entry.id)
     except httpx.TransportError as e:
         _logger.warning(f"  Network error fetching .content for {doc.id}: {e}")
         return []
@@ -203,7 +203,7 @@ async def _collect_pages_for_queue(
             continue
 
         try:
-            rm_content = await ctx.client.get_blob(rm_hash)
+            rm_content = await ctx.client.get_blob(rm_hash, rm_id)
         except httpx.TransportError as e:
             _logger.warning(f"    Network error fetching .rm for page {page_id}: {e}")
             break
@@ -243,7 +243,7 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
 
     # 2. Fetch and parse .content
     try:
-        content_bytes = await ctx.client.get_blob(content_entry.hash)
+        content_bytes = await ctx.client.get_blob(content_entry.hash, content_entry.id)
     except httpx.TransportError as e:
         _logger.warning(f"  Network error fetching .content for {doc.id}: {e}")
         return []
@@ -294,7 +294,7 @@ async def process_document_pages(ctx: JournalContext, doc: BlobDoc):
             continue
 
         try:
-            rm_content = await ctx.client.get_blob(rm_hash)
+            rm_content = await ctx.client.get_blob(rm_hash, rm_id)
         except httpx.TransportError as e:
             _logger.warning(
                 f"    Network error fetching .rm for page {page_id}: {e}, "

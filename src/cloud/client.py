@@ -57,12 +57,20 @@ class RemarkableClient:
                 f"Failed to get root info: {response.status_code} {response.text}"
             )
 
-    async def get_blob(self, hash_str: str) -> Optional[bytes]:
-        """Fetch a blob by its hash."""
+    async def get_blob(self, hash_str: str, filename: str) -> Optional[bytes]:
+        """Fetch a blob by its hash.
+
+        The rm-filename header is required by the reMarkable API (enforced
+        since ~2026-05-18). The value must include a file extension;
+        a bare UUID or hash returns HTTP 400.
+        """
         url = f"{BLOB_URL}{hash_str}"
-        response = await self._request("GET", url)
+        response = await self._request("GET", url, headers={"rm-filename": filename})
         if response.status_code == 200:
             return response.content
+        _logger.warning(
+            f"get_blob({filename!r}) returned {response.status_code}: {response.text[:200]}"
+        )
         return None
 
     def parse_index(self, content: bytes) -> List[Entry]:
@@ -100,7 +108,10 @@ class RemarkableClient:
         if not root_hash:
             return []
 
-        root_blob_content = await self.get_blob(root_hash)
+        root_blob_content = await self.get_blob(root_hash, "root.docSchema")
+        if root_blob_content is None:
+            _logger.error(f"Failed to fetch root blob (hash={root_hash[:16]}...), aborting list_docs")
+            return []
         root_entries = self.parse_index(root_blob_content)
 
         docs = []
@@ -125,7 +136,10 @@ class RemarkableClient:
 
             cache_miss_count += 1
             try:
-                doc_index_content = await self.get_blob(entry.hash)
+                doc_index_content = await self.get_blob(entry.hash, f"{entry.id}.docSchema")
+                if doc_index_content is None:
+                    _logger.warning(f"Failed to fetch doc index for {entry.id}, skipping")
+                    continue
                 doc_subentries = self.parse_index(doc_index_content)
 
                 doc = BlobDoc(id=entry.id, hash=entry.hash, entries=doc_subentries)
@@ -134,9 +148,12 @@ class RemarkableClient:
                     (e for e in doc_subentries if e.id.endswith(".metadata")), None
                 )
                 if meta_entry:
-                    meta_json = await self.get_blob(meta_entry.hash)
-                    meta_data = json.loads(meta_json)
-                    doc.metadata = MetaItem.from_dict(meta_data)
+                    meta_json = await self.get_blob(meta_entry.hash, meta_entry.id)
+                    if meta_json is None:
+                        _logger.warning(f"Failed to fetch metadata for {entry.id}, skipping metadata")
+                    else:
+                        meta_data = json.loads(meta_json)
+                        doc.metadata = MetaItem.from_dict(meta_data)
 
                 await self.cache.set(entry.id, doc)
                 self._memory[entry.id] = doc
@@ -176,7 +193,10 @@ class RemarkableClient:
         if not root_hash:
             return None
 
-        root_blob_content = await self.get_blob(root_hash)
+        root_blob_content = await self.get_blob(root_hash, "root.docSchema")
+        if root_blob_content is None:
+            _logger.error(f"Failed to fetch root blob (hash={root_hash[:16]}...), aborting get_doc")
+            return None
         root_entries = self.parse_index(root_blob_content)
 
         entry = next((e for e in root_entries if e.id == doc_id), None)
@@ -189,7 +209,10 @@ class RemarkableClient:
             return cached_doc
 
         try:
-            doc_index_content = await self.get_blob(entry.hash)
+            doc_index_content = await self.get_blob(entry.hash, f"{entry.id}.docSchema")
+            if doc_index_content is None:
+                _logger.warning(f"Failed to fetch doc index for {doc_id}")
+                return None
             doc_subentries = self.parse_index(doc_index_content)
 
             doc = BlobDoc(id=entry.id, hash=entry.hash, entries=doc_subentries)
@@ -198,9 +221,12 @@ class RemarkableClient:
                 (e for e in doc_subentries if e.id.endswith(".metadata")), None
             )
             if meta_entry:
-                meta_json = await self.get_blob(meta_entry.hash)
-                meta_data = json.loads(meta_json)
-                doc.metadata = MetaItem.from_dict(meta_data)
+                meta_json = await self.get_blob(meta_entry.hash, meta_entry.id)
+                if meta_json is None:
+                    _logger.warning(f"Failed to fetch metadata for {doc_id}, proceeding without metadata")
+                else:
+                    meta_data = json.loads(meta_json)
+                    doc.metadata = MetaItem.from_dict(meta_data)
 
             await self.cache.set(doc_id, doc)
             self._memory[doc_id] = doc
@@ -225,7 +251,9 @@ class RemarkableClient:
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for entry in doc.entries:
                 try:
-                    blob_content = await self.get_blob(entry.hash)
+                    blob_content = await self.get_blob(entry.hash, entry.id)
+                    if blob_content is None:
+                        raise ValueError(f"get_blob returned None for {entry.id}")
                     zip_file.writestr(entry.id, blob_content)
                 except Exception as e:
                     _logger.error(
